@@ -384,17 +384,19 @@ fn find_twin_split(idx: &mut BlockInfoIndex, asm: &mut crate::assemble::Assemble
                 Ok(bi) => bi.name.clone(),
                 Err(_) => cand.clone(),
             };
+            let dir = correct_tilted_twin_dir(&b.name, cand, b.dir);
             return Ok((
                 ident,
-                b.dir,
-                format!("geometry unavailable; selected named plain twin {cand}, preserving direction {}", b.dir),
+                dir,
+                format!("geometry unavailable; selected named plain twin {cand}, direction {dir}"),
             ));
         }
         if let Some(cand) = cands.first() {
+            let dir = correct_tilted_twin_dir(&b.name, cand, b.dir);
             return Ok((
                 cand.clone(),
-                b.dir,
-                format!("geometry and pack metadata unavailable; selected named plain twin {cand}, preserving direction {}", b.dir),
+                dir,
+                format!("geometry and pack metadata unavailable; selected named plain twin {cand}, direction {dir}"),
             ));
         }
 
@@ -435,9 +437,21 @@ fn find_twin_split(idx: &mut BlockInfoIndex, asm: &mut crate::assemble::Assemble
         }
     }
     match best {
-        Some((c, cov, ident, dir)) if c >= 0.95 && cov >= 0.8 => Ok((ident, dir, format!("contained {c:.2} covered {cov:.2}; tried {}", tried.join(" ")))),
+        Some((c, cov, ident, dir)) if c >= 0.95 && cov >= 0.8 => {
+            let dir = correct_tilted_twin_dir(&b.name, &ident, dir);
+            Ok((ident, dir, format!("contained {c:.2} covered {cov:.2}; tried {}", tried.join(" "))))
+        }
         Some((c, cov, ident, _)) => Err(format!("best {ident} contained {c:.2} covered {cov:.2} < 0.95/0.80; tried {}", tried.join(" "))),
         None => Err(format!("no candidate exists among {:?}", cands)),
+    }
+}
+
+fn correct_tilted_twin_dir(source: &str, twin: &str, dir: u8) -> u8 {
+    let is_tilted_checkpoint = source.contains("CheckpointTiltLeft") || source.contains("CheckpointTiltRight");
+    if is_tilted_checkpoint && twin.contains("TiltStraight") {
+        (dir + 2) % 4
+    } else {
+        dir
     }
 }
 
