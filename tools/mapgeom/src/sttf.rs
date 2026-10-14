@@ -384,19 +384,17 @@ fn find_twin_split(idx: &mut BlockInfoIndex, asm: &mut crate::assemble::Assemble
                 Ok(bi) => bi.name.clone(),
                 Err(_) => cand.clone(),
             };
-            let dir = fallback_twin_dir(b, cand);
             return Ok((
                 ident,
-                dir,
-                format!("geometry unavailable; selected named plain twin {cand}, direction {dir}"),
+                b.dir,
+                format!("geometry unavailable; selected named plain twin {cand}, preserving direction {}", b.dir),
             ));
         }
         if let Some(cand) = cands.first() {
-            let dir = fallback_twin_dir(b, cand);
             return Ok((
                 cand.clone(),
-                dir,
-                format!("geometry and pack metadata unavailable; selected named plain twin {cand}, direction {dir}"),
+                b.dir,
+                format!("geometry and pack metadata unavailable; selected named plain twin {cand}, preserving direction {}", b.dir),
             ));
         }
 
@@ -440,14 +438,6 @@ fn find_twin_split(idx: &mut BlockInfoIndex, asm: &mut crate::assemble::Assemble
         Some((c, cov, ident, dir)) if c >= 0.95 && cov >= 0.8 => Ok((ident, dir, format!("contained {c:.2} covered {cov:.2}; tried {}", tried.join(" ")))),
         Some((c, cov, ident, _)) => Err(format!("best {ident} contained {c:.2} covered {cov:.2} < 0.95/0.80; tried {}", tried.join(" "))),
         None => Err(format!("no candidate exists among {:?}", cands)),
-    }
-}
-
-fn fallback_twin_dir(block: &BlockRec, twin: &str) -> u8 {
-    if block.name.contains("CheckpointTilt") && twin.contains("TiltStraight") {
-        (block.dir + 2) % 4
-    } else {
-        block.dir
     }
 }
 
