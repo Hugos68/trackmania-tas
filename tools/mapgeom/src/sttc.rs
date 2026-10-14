@@ -1317,7 +1317,7 @@ mod tests {
         let c = twin_candidates("PlatformTechCheckpointSlope2Right");
         assert_eq!(c[0], "PlatformTechSlope2Base");
         assert_eq!(c[1], "PlatformTechSlope2Straight");
-        assert!(twin_candidates("GateCheckpoint").contains(&"Gate".to_string()));
+        assert!(twin_candidates("GateCheckpoint").is_empty());
     }
 
     #[test]

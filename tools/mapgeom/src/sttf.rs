@@ -27,6 +27,12 @@ pub fn twin_candidates(name: &str) -> Vec<String> {
     };
     // the engine's own spellings: `CheckPoint` on the diagonal tech roads
     let norm = name.replace("CheckPoint", "Checkpoint");
+    if norm == "GateCheckpoint" {
+        return out;
+    }
+    if norm == "PlatformTechCheckpoint" {
+        push("PlatformTechBase".to_string());
+    }
     for (from, to) in [
         ("CheckpointTiltLeft", "TiltStraight"),
         ("CheckpointTiltRight", "TiltStraight"),
@@ -447,8 +453,13 @@ fn find_twin_split(idx: &mut BlockInfoIndex, asm: &mut crate::assemble::Assemble
 }
 
 fn correct_tilted_twin_dir(source: &str, twin: &str, dir: u8) -> u8 {
-    let is_tilted_checkpoint = source.contains("CheckpointTiltLeft") || source.contains("CheckpointTiltRight");
-    if is_tilted_checkpoint && twin.contains("TiltStraight") {
+    let is_tilted_checkpoint =
+        source.contains("CheckpointTiltLeft") || source.contains("CheckpointTiltRight");
+    let is_slope_checkpoint =
+        source.contains("CheckpointSlopeUp") || source.contains("CheckpointSlopeDown");
+    if (is_tilted_checkpoint && twin.contains("TiltStraight"))
+        || (is_slope_checkpoint && twin.contains("SlopeStraight"))
+    {
         (dir + 2) % 4
     } else {
         dir
