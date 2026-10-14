@@ -69,6 +69,9 @@ COMMANDS
       [--collection BlueBay]
                                 every authored block with its picked variant,
                                 cells, prefabs and what each side faces
+  flags <file.Map.Gbx> --out OUT [--dry-run] [--report TSV]
+                                remove finish blocks/items and their owned
+                                baked clips; ordinary items are preserved
   sttf <file.Map.Gbx> --out OUT [--cp plain|remove] [--dry-run] [--report TSV]
                                 Start-To-The-Finish: every checkpoint gone — a
                                 checkpoint BLOCK becomes its plain twin (chosen
@@ -3741,6 +3744,39 @@ fn main() {
         "shape-audit" => {
             let mut store = open(&a);
             mapgeom::shape_audit::cmd(&mut store, &a.rest[1..]);
+        }
+        "flags" => {
+            let mut store = open(&a);
+            let p = a.rest.get(1).cloned().unwrap_or_else(|| die("flags needs a MAP path".into()));
+            let dry = a.rest.iter().any(|x| x == "--dry-run");
+            let out = flag(&a.rest, "--out").unwrap_or_else(|| if dry { "/dev/null".into() } else { die("flags needs --out OUT.Map.Gbx".into()) });
+            let o = mapgeom::flags::remove_finishes(&mut store, std::path::Path::new(&p), std::path::Path::new(&out), dry).unwrap_or_else(die);
+            let mut report = String::from("kind\tindex\tname\taction\n");
+            for r in &o.rows {
+                report.push_str(r);
+                report.push('\n');
+            }
+            match flag(&a.rest, "--report") {
+                Some(r) => {
+                    std::fs::write(&r, &report).unwrap_or_else(|e| die(e.to_string()));
+                    println!("wrote {r}");
+                }
+                None => print!("{report}"),
+            }
+            println!(
+                "{p}: {} finish blocks, {} finish items, {} baked clips removed{}",
+                o.finish_blocks, o.finish_items, o.removed_baked,
+                if dry { " (dry run)" } else { "" }
+            );
+            if !dry {
+                let mut verify_store = open(&a);
+                let bad = mapgeom::flags::verify(&mut verify_store, std::path::Path::new(&out)).unwrap_or_else(die);
+                if bad.is_empty() {
+                    println!("verified {out}");
+                } else {
+                    die::<()>(format!("VERIFY FAILED on {out}:\n  {}", bad.join("\n  ")));
+                }
+            }
         }
         // sttf MAP --out OUT [--dry-run] [--report R.tsv]: every checkpoint gone
         // (blocks → their plain twin by geometry, else removed; items removed;
