@@ -3764,8 +3764,8 @@ fn main() {
                 None => print!("{report}"),
             }
             println!(
-                "{p}: {} finish blocks, {} finish items, {} baked clips removed; map name -> {:?}{}",
-                o.finish_blocks, o.finish_items, o.removed_baked,
+                "{p}: {} finish blocks, {} finish items, {} baked clips removed, {} flag triggers added; map name -> {:?}{}",
+                o.finish_blocks, o.finish_items, o.removed_baked, o.added_triggers,
                 o.map_name.as_deref().unwrap_or("-"),
                 if dry { " (dry run)" } else { "" }
             );

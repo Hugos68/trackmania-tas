@@ -281,7 +281,7 @@ pub fn owned_baked(ctx: &mut Ctx, m: &MapFile, cells: &HashSet<[i32; 3]>) -> Vec
         } else if r.name.contains("FCB") {
             [x, y + 1, z]
         } else {
-            let (dx, dz) = crate::blockmap::SIDE_VEC[(r.dir & 3) as usize];
+            let (dx, _dz) = crate::blockmap::SIDE_VEC[(r.dir & 3) as usize];
             [x + dx, y, z]
         };
         if cells.contains(&owner) {

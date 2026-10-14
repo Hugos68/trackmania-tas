@@ -7,9 +7,12 @@
 
 use crate::sttc::{self, Ctx, WP_FINISH, WP_STARTFINISH};
 use crate::DataStore;
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::path::Path;
 use tmmaps::map::MapFile;
+
+const TRIGGER_MODEL: &str = "ClothFinishTrigger.Item.Gbx";
+const TRIGGER_ASSET: &[u8] = include_bytes!("../assets/ClothFinishTrigger.Item.Gbx");
 
 #[derive(Default)]
 pub struct Outcome {
@@ -17,6 +20,7 @@ pub struct Outcome {
     pub finish_blocks: usize,
     pub finish_items: usize,
     pub removed_baked: usize,
+    pub added_triggers: usize,
     pub map_name: Option<String>,
 }
 
@@ -28,6 +32,14 @@ fn row(kind: &str, index: usize, name: &str, action: &str) -> String {
     format!("{kind}\t{index}\t{}\t{action}", name.replace('\t', " "))
 }
 
+fn is_visual_flag(model: &str) -> bool {
+    matches!(model, "Flag8m" | "Flag16m")
+}
+
+fn same_position(a: [f32; 3], b: [f32; 3]) -> bool {
+    a.iter().zip(b).all(|(x, y)| (*x - y).abs() <= 0.001)
+}
+
 /// Remove every finish from `src` and write the result to `out`.
 pub fn remove_finishes(
     store: &mut DataStore,
@@ -35,7 +47,7 @@ pub fn remove_finishes(
     out: &Path,
     dry: bool,
 ) -> Result<Outcome, String> {
-    let mut m = MapFile::try_load(src)?;
+    let mut working_src = src.to_path_buf();
     let source_name = tmmaps::header::read(
         src.to_str()
             .ok_or_else(|| format!("map path is not valid UTF-8: {}", src.display()))?,
@@ -48,6 +60,30 @@ pub fn remove_finishes(
         ));
     }
     let new_name = format!("{source_name} Flags");
+    if !dry {
+        let sttf_path = std::env::temp_dir().join(format!(
+            "trackmania-tas-flags-{}-{}.Map.Gbx",
+            std::process::id(),
+            source_name
+                .chars()
+                .map(|c| if matches!(c, '\\' | '/' | ':' | ' ') { '_' } else { c })
+                .collect::<String>()
+        ));
+        let sttf_map = MapFile::try_load(src)?;
+        let mut sttf_ctx = Ctx::new(store, &sttf_map);
+        crate::sttf::sttf(
+            &mut sttf_ctx,
+            src,
+            &sttf_path,
+            crate::sttf::CpMode::Plain,
+            false,
+        )?;
+        working_src = sttf_path;
+    }
+    let mut m = MapFile::try_load(&working_src)?;
+    if working_src != src {
+        std::fs::remove_file(&working_src).map_err(|e| e.to_string())?;
+    }
     let mut ctx = Ctx::new(store, &m);
     let mut outcome = Outcome::default();
     outcome.map_name = Some(new_name.clone());
@@ -69,6 +105,9 @@ pub fn remove_finishes(
 
     let mut drop_items = HashSet::new();
     for it in m.items.clone() {
+        if it.model == TRIGGER_MODEL {
+            continue;
+        }
         let class = ctx.item_class(&it);
         if !is_finish(&class) {
             continue;
@@ -107,6 +146,109 @@ pub fn remove_finishes(
     let mut m = MapFile::try_load(out)?;
     m.remove_items(|it| drop_items.contains(&it.index));
     m.write_to(out).map_err(|e| e.to_string())?;
+    m = MapFile::try_load(out)?;
+
+    let flag_positions: Vec<[f32; 3]> = m
+        .items
+        .iter()
+        .filter(|it| is_visual_flag(&it.model))
+        .map(|it| it.pos)
+        .collect();
+    let existing_triggers: Vec<[f32; 3]> = m
+        .items
+        .iter()
+        .filter(|it| it.model == TRIGGER_MODEL)
+        .map(|it| it.pos)
+        .collect();
+    let trigger_positions: Vec<[f32; 3]> = flag_positions
+        .into_iter()
+        .filter(|pos| !existing_triggers.iter().any(|other| same_position(*pos, *other)))
+        .collect();
+    let first_trigger = m.items.len();
+    if !trigger_positions.is_empty() {
+        m.append_item_clones(first_trigger + trigger_positions.len());
+        m.write_to(out).map_err(|e| e.to_string())?;
+        m = MapFile::try_load(out)?;
+        if m.items.len() < first_trigger + trigger_positions.len() {
+            return Err(format!(
+                "appended item records did not persist: expected at least {}, found {}",
+                first_trigger + trigger_positions.len(),
+                m.items.len()
+            ));
+        }
+
+        for (offset, pos) in trigger_positions.iter().enumerate() {
+            let index = first_trigger + offset;
+            m.set_item_model(index, TRIGGER_MODEL);
+            m.set_item_author(index, TRIGGER_MODEL);
+            m.set_item_collection(index, 0x10);
+            m.move_item_pos(index, *pos);
+            m.set_item_frame(index, [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]);
+            m.set_item_scale(index, 1.0);
+            m.clear_item_variant(index);
+        }
+        m.write_to(out).map_err(|e| e.to_string())?;
+        m = MapFile::try_load(out)?;
+
+        for offset in 0..trigger_positions.len() {
+            m.set_item_waypoint_tag(first_trigger + offset, Some("Goal"));
+            outcome.rows.push(row(
+                "item",
+                first_trigger + offset,
+                TRIGGER_MODEL,
+                "added",
+            ));
+        }
+        m.write_to(out).map_err(|e| e.to_string())?;
+
+        let mut manifest = BTreeSet::new();
+        for item in &m.items {
+            if let Some(author) = item.author.as_deref() {
+                if author != "Nadeo" {
+                    manifest.insert((item.model.clone(), author.to_string()));
+                }
+            }
+        }
+        manifest.insert((TRIGGER_MODEL.to_string(), TRIGGER_MODEL.to_string()));
+        let manifest_refs: Vec<(&str, &str)> = manifest
+            .iter()
+            .map(|(model, author)| (model.as_str(), author.as_str()))
+            .collect();
+        let (zip, has_archive) =
+            tmmaps::header::embedded_zip_bytes(&m.gbx.body)
+                .map(|(zip, names)| {
+                    let has_trigger = names
+                        .iter()
+                        .any(|name| name.replace('\\', "/") == format!("Items/{TRIGGER_MODEL}"));
+                    let zip = if has_trigger {
+                        zip
+                    } else {
+                        tmmaps::header::zip_add(
+                            &zip,
+                            &format!("Items/{TRIGGER_MODEL}"),
+                            TRIGGER_ASSET,
+                        )
+                    };
+                    (zip, true)
+                })
+                .unwrap_or_else(|| {
+                    (
+                        tmmaps::header::zip_add(
+                            &[],
+                            &format!("Items/{TRIGGER_MODEL}"),
+                            TRIGGER_ASSET,
+                        ),
+                        false,
+                    )
+                });
+        if has_archive {
+            m.replace_embedded_objects(&manifest_refs, &zip);
+        } else {
+            m.insert_embedded_objects(&manifest_refs, &zip);
+        }
+        m.write_to(out).map_err(|e| e.to_string())?;
+    }
+    outcome.added_triggers = trigger_positions.len();
     Ok(outcome)
 }
 
@@ -134,9 +276,48 @@ pub fn verify(
         }
     }
     for it in &m.items {
+        if it.model == TRIGGER_MODEL {
+            if it.waypoint_tag.as_deref() != Some("Goal") {
+                bad.push(format!("flag trigger is not tagged Goal: {}", it.index));
+            }
+            continue;
+        }
         if is_finish(&ctx.item_class(it)) {
             bad.push(format!("finish item remains: {}", it.model));
         }
+    }
+
+    let flags: Vec<_> = m.items.iter().filter(|it| is_visual_flag(&it.model)).collect();
+    let triggers: Vec<_> = m
+        .items
+        .iter()
+        .filter(|it| it.model == TRIGGER_MODEL)
+        .collect();
+    if triggers.len() != flags.len() {
+        bad.push(format!(
+            "expected one flag trigger per visual flag: {} flags, {} triggers",
+            flags.len(),
+            triggers.len()
+        ));
+    }
+    for flag in flags {
+        let matches = triggers
+            .iter()
+            .filter(|trigger| same_position(flag.pos, trigger.pos))
+            .count();
+        if matches != 1 {
+            bad.push(format!(
+                "visual flag at ({:.3}, {:.3}, {:.3}) has {} matching triggers",
+                flag.pos[0], flag.pos[1], flag.pos[2], matches
+            ));
+        }
+    }
+    let embedded = tmmaps::header::embedded_zip_bytes(&m.gbx.body)
+        .ok_or_else(|| format!("{} has no embedded-objects archive", out.display()))?;
+    if !embedded.1.iter().any(|name| {
+        name.replace('\\', "/") == format!("Items/{TRIGGER_MODEL}")
+    }) {
+        bad.push(format!("embedded item is missing: Items/{TRIGGER_MODEL}"));
     }
     Ok(bad)
 }
