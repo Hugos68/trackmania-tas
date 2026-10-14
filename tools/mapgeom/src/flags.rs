@@ -17,6 +17,7 @@ pub struct Outcome {
     pub finish_blocks: usize,
     pub finish_items: usize,
     pub removed_baked: usize,
+    pub map_name: Option<String>,
 }
 
 fn is_finish(class: &sttc::Class) -> bool {
@@ -35,8 +36,21 @@ pub fn remove_finishes(
     dry: bool,
 ) -> Result<Outcome, String> {
     let mut m = MapFile::try_load(src)?;
+    let source_name = tmmaps::header::read(
+        src.to_str()
+            .ok_or_else(|| format!("map path is not valid UTF-8: {}", src.display()))?,
+    )?
+    .name;
+    if source_name == "-" || source_name.is_empty() {
+        return Err(format!(
+            "{} does not declare an internal map name",
+            src.display()
+        ));
+    }
+    let new_name = format!("{source_name} Flags");
     let mut ctx = Ctx::new(store, &m);
     let mut outcome = Outcome::default();
+    outcome.map_name = Some(new_name.clone());
     let mut drop_blocks = HashSet::new();
     let mut drop_cells = HashSet::new();
 
@@ -80,6 +94,10 @@ pub fn remove_finishes(
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
+    m.set_map_name(&source_name, &new_name);
+    m.write_to(out).map_err(|e| e.to_string())?;
+    m = MapFile::try_load(out)?;
+
     m.remove_blocks(
         |b| drop_blocks.contains(&b.index),
         |b| owned.contains(&b.index),
@@ -92,10 +110,24 @@ pub fn remove_finishes(
     Ok(outcome)
 }
 
-pub fn verify(store: &mut DataStore, out: &Path) -> Result<Vec<String>, String> {
+pub fn verify(
+    store: &mut DataStore,
+    out: &Path,
+    expected_name: Option<&str>,
+) -> Result<Vec<String>, String> {
     let m = MapFile::try_load(out)?;
     let mut ctx = Ctx::new(store, &m);
     let mut bad = Vec::new();
+    if let Some(expected) = expected_name {
+        let actual = tmmaps::header::read(
+            out.to_str()
+                .ok_or_else(|| format!("map path is not valid UTF-8: {}", out.display()))?,
+        )?
+        .name;
+        if actual != expected {
+            bad.push(format!("map name is {actual:?}, expected {expected:?}"));
+        }
+    }
     for b in &m.blocks {
         if is_finish(&ctx.block_class(b)) {
             bad.push(format!("finish block remains: {}", b.name));

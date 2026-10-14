@@ -3764,13 +3764,14 @@ fn main() {
                 None => print!("{report}"),
             }
             println!(
-                "{p}: {} finish blocks, {} finish items, {} baked clips removed{}",
+                "{p}: {} finish blocks, {} finish items, {} baked clips removed; map name -> {:?}{}",
                 o.finish_blocks, o.finish_items, o.removed_baked,
+                o.map_name.as_deref().unwrap_or("-"),
                 if dry { " (dry run)" } else { "" }
             );
             if !dry {
                 let mut verify_store = open(&a);
-                let bad = mapgeom::flags::verify(&mut verify_store, std::path::Path::new(&out)).unwrap_or_else(die);
+                let bad = mapgeom::flags::verify(&mut verify_store, std::path::Path::new(&out), o.map_name.as_deref()).unwrap_or_else(die);
                 if bad.is_empty() {
                     println!("verified {out}");
                 } else {
@@ -3788,7 +3789,7 @@ fn main() {
             let out = flag(&a.rest, "--out").unwrap_or_else(|| if dry { "/dev/null".into() } else { die("sttf needs --out OUT.Map.Gbx".into()) });
             let m = tmmaps::map::MapFile::load(std::path::Path::new(&p));
             let mut ctx = mapgeom::sttc::Ctx::new(&mut store, &m);
-            let o = mapgeom::sttc::sttf(&mut ctx, std::path::Path::new(&p), std::path::Path::new(&out), sttc_cp_mode(&a.rest), dry).unwrap_or_else(die);
+            let o = mapgeom::sttf::sttf(&mut ctx, std::path::Path::new(&p), std::path::Path::new(&out), sttc_cp_mode(&a.rest), dry).unwrap_or_else(die);
             let mut tsv = String::from(mapgeom::sttc::REPORT_HEADER);
             tsv.push('\n');
             for r in &o.rows {
@@ -3808,7 +3809,7 @@ fn main() {
                 if dry { " (dry run)" } else { "" }
             );
             if !dry {
-                let bad = mapgeom::sttc::verify_sttf(std::path::Path::new(&p), std::path::Path::new(&out), &o).unwrap_or_else(die);
+                let bad = mapgeom::sttf::verify_sttf(std::path::Path::new(&p), std::path::Path::new(&out), &o).unwrap_or_else(die);
                 if bad.is_empty() {
                     println!("verified {out}");
                 } else {
@@ -5341,10 +5342,10 @@ fn flag(args: &[String], name: &str) -> Option<String> {
 }
 
 /// `--cp plain|remove`: what a checkpoint block becomes (sttf, sttc).
-fn sttc_cp_mode(rest: &[String]) -> mapgeom::sttc::CpMode {
+fn sttc_cp_mode(rest: &[String]) -> mapgeom::sttf::CpMode {
     match flag(rest, "--cp").as_deref() {
-        None | Some("plain") => mapgeom::sttc::CpMode::Plain,
-        Some("remove") => mapgeom::sttc::CpMode::Remove,
+        None | Some("plain") => mapgeom::sttf::CpMode::Plain,
+        Some("remove") => mapgeom::sttf::CpMode::Remove,
         Some(o) => die(format!("--cp plain | remove, not `{o}`")),
     }
 }
