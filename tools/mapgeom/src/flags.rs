@@ -205,14 +205,18 @@ pub fn remove_finishes(
         for item in &m.items {
             if let Some(author) = item.author.as_deref() {
                 if author != "Nadeo" {
-                    manifest.insert((item.model.clone(), author.to_string()));
+                    manifest.insert((
+                        item.model.clone(),
+                        item.collection_raw,
+                        author.to_string(),
+                    ));
                 }
             }
         }
-        manifest.insert((TRIGGER_MODEL.to_string(), TRIGGER_MODEL.to_string()));
-        let manifest_refs: Vec<(&str, &str)> = manifest
+        manifest.insert((TRIGGER_MODEL.to_string(), 0x10, TRIGGER_MODEL.to_string()));
+        let manifest_refs: Vec<(&str, u32, &str)> = manifest
             .iter()
-            .map(|(model, author)| (model.as_str(), author.as_str()))
+            .map(|(model, collection, author)| (model.as_str(), *collection, author.as_str()))
             .collect();
         let (zip, has_archive) =
             tmmaps::header::embedded_zip_bytes(&m.gbx.body)
@@ -242,9 +246,9 @@ pub fn remove_finishes(
                     )
                 });
         if has_archive {
-            m.replace_embedded_objects(&manifest_refs, &zip);
+            m.replace_embedded_objects_with_collections(&manifest_refs, &zip);
         } else {
-            m.insert_embedded_objects(&manifest_refs, &zip);
+            m.insert_embedded_objects_with_collections(&manifest_refs, &zip);
         }
         m.write_to(out).map_err(|e| e.to_string())?;
     }

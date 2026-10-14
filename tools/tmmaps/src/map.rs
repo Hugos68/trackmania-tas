@@ -2722,6 +2722,19 @@ impl MapFile {
         self.raw_splices.push(((payload + 12, payload + size), b[12..].to_vec()));
     }
 
+    pub fn replace_embedded_objects_with_collections(
+        &mut self,
+        items: &[(&str, u32, &str)],
+        zip: &[u8],
+    ) {
+        let (_, _, payload, size) = crate::gbx::all_skip_chunks(&self.gbx.body)
+            .into_iter()
+            .find(|(cid, ..)| *cid == 0x0304_3054)
+            .expect("map has no embedded-objects chunk 0x03043054");
+        let b = embedded_objects_payload_with_collections(items, zip);
+        self.raw_splices.push(((payload + 12, payload + size), b[12..].to_vec()));
+    }
+
     /// Insert the embedded-object chunk for maps that do not already carry one.
     pub fn insert_embedded_objects(&mut self, items: &[(&str, &str)], zip: &[u8]) {
         if crate::gbx::all_skip_chunks(&self.gbx.body)
@@ -2737,6 +2750,31 @@ impl MapFile {
             .expect("map has no body chunks");
         let collection = self.items.first().map(|it| it.collection_raw).unwrap_or(26);
         let data = embedded_objects_payload(items, zip, collection);
+        let mut chunk = Vec::with_capacity(12 + data.len());
+        chunk.extend_from_slice(&0x0304_3054u32.to_le_bytes());
+        chunk.extend_from_slice(b"PIKS");
+        chunk.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        chunk.extend_from_slice(&data);
+        self.raw_splices.push(((payload + size, payload + size), chunk));
+    }
+
+    pub fn insert_embedded_objects_with_collections(
+        &mut self,
+        items: &[(&str, u32, &str)],
+        zip: &[u8],
+    ) {
+        if crate::gbx::all_skip_chunks(&self.gbx.body)
+            .iter()
+            .any(|(cid, ..)| *cid == 0x0304_3054)
+        {
+            self.replace_embedded_objects_with_collections(items, zip);
+            return;
+        }
+        let (_, _, payload, size) = crate::gbx::all_skip_chunks(&self.gbx.body)
+            .last()
+            .copied()
+            .expect("map has no body chunks");
+        let data = embedded_objects_payload_with_collections(items, zip);
         let mut chunk = Vec::with_capacity(12 + data.len());
         chunk.extend_from_slice(&0x0304_3054u32.to_le_bytes());
         chunk.extend_from_slice(b"PIKS");
@@ -2787,6 +2825,17 @@ fn esc_xml(s: &str) -> String {
 /// of what follows, the manifest of (Ident, collection, author), the ZIP with
 /// its length, and a trailing zero. `items` are (item ident, author).
 pub fn embedded_objects_payload(items: &[(&str, &str)], zip: &[u8], collection: u32) -> Vec<u8> {
+    let with_collections: Vec<(&str, u32, &str)> = items
+        .iter()
+        .map(|(name, author)| (*name, collection, *author))
+        .collect();
+    embedded_objects_payload_with_collections(&with_collections, zip)
+}
+
+pub fn embedded_objects_payload_with_collections(
+    items: &[(&str, u32, &str)],
+    zip: &[u8],
+) -> Vec<u8> {
     let mut b = Vec::new();
     b.extend_from_slice(&1u32.to_le_bytes());
     b.extend_from_slice(&0u32.to_le_bytes());
@@ -2807,7 +2856,7 @@ pub fn embedded_objects_payload(items: &[(&str, &str)], zip: &[u8], collection: 
                 b.extend_from_slice(s.as_bytes());
             }
         };
-        for (name, author) in items.iter() {
+        for (name, collection, author) in items.iter() {
             // The Ident is the file name relative to Items/, verbatim: it is
             // what the placements name and what the ZIP entry is called.
             put(&mut b, name);
