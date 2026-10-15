@@ -479,14 +479,17 @@ fn correct_tilted_twin_dir(source: &str, twin: &str, dir: u8) -> u8 {
         source.contains("CheckpointTiltLeft") || source.contains("CheckpointTiltRight");
     let is_slope_checkpoint =
         source.contains("CheckpointSlopeUp") || source.contains("CheckpointSlopeDown");
-    let is_nontech_platform_slope2 =
+    let is_platform_tilted_checkpoint =
         source.starts_with("Platform")
-            && !source.starts_with("PlatformTech")
-            && source.contains("CheckpointSlope2")
-            && twin.contains("Slope2Straight");
-    if is_nontech_platform_slope2 {
-        // Non-road platform Slope2 checkpoints use a quarter-turn offset
-        // relative to their straight twin.
+            && (source.contains("CheckpointTilt")
+                || source.contains("CheckpointSlope"))
+            && (twin.contains("TiltStraight")
+                || twin.contains("SlopeStraight")
+                || twin.contains("Slope2Straight"));
+    if is_platform_tilted_checkpoint {
+        // Platform tilted checkpoints use a quarter-turn offset relative to
+        // their plain tilted twin. Keep this separate from road corrections:
+        // their placement convention is different.
         (dir + 3) % 4
     } else if (is_tilted_checkpoint && twin.contains("TiltStraight"))
         || (is_slope_checkpoint && twin.contains("SlopeStraight"))
@@ -578,4 +581,30 @@ pub fn verify_sttf(src: &Path, out: &Path, outcome: &SttfOutcome) -> Result<Vec<
         bad.push("validation ghost chunk still present".into());
     }
     Ok(bad)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::correct_tilted_twin_dir;
+
+    #[test]
+    fn platform_tilted_twins_turn_counter_clockwise() {
+        for material in ["Grass", "Dirt", "Ice", "Plastic", "Snow", "Future"] {
+            let source = format!("Platform{}CheckpointSlope2Right", material);
+            let twin = format!("Platform{}Slope2Straight", material);
+            assert_eq!(correct_tilted_twin_dir(&source, &twin, 1), 0);
+        }
+    }
+
+    #[test]
+    fn platform_regular_and_road_tilt_rules_remain_distinct() {
+        assert_eq!(
+            correct_tilted_twin_dir("PlatformGrassCheckpoint", "PlatformGrassStraight", 1),
+            1
+        );
+        assert_eq!(
+            correct_tilted_twin_dir("RoadTechCheckpointTiltLeft", "RoadTechTiltStraight", 1),
+            3
+        );
+    }
 }
