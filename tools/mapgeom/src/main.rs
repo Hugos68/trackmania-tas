@@ -194,6 +194,23 @@ fn open(a: &Args) -> DataStore {
         }
     }
     if paths.is_empty() {
+        // A client install: its packs have fixed keys, so the block geometry is available.
+        let mut store = DataStore::empty();
+        let mut any = false;
+        for (name, key) in [
+            ("BlueBay.pak", "660C4C156B80337E296A1034B0AA05B8"),
+            ("Stadium.pak", "B773D73047A4104857722366D78D28A6"),
+            ("Maniaplanet.pak", "9A93723447347A8CE336CCFC49E65449"),
+        ] {
+            let p = format!("{}/{}", a.packs, name);
+            if std::path::Path::new(&p).exists() {
+                store.add_pak(&p, key).unwrap_or_else(|e| die(e));
+                any = true;
+            }
+        }
+        if any {
+            return store;
+        }
         eprintln!("no .pak files in {} (pass --pak FILE for a client pack)", a.packs);
         std::process::exit(2);
     }

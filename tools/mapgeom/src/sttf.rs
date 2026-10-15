@@ -466,7 +466,7 @@ fn find_twin_split(idx: &mut BlockInfoIndex, asm: &mut crate::assemble::Assemble
     }
     match best {
         Some((c, cov, ident, dir)) if c >= 0.95 && cov >= 0.8 => {
-            let dir = correct_tilted_twin_dir(&b.name, &ident, dir);
+            // The measured rotation is authoritative (it matches the in-game orientation).
             Ok((ident, dir, format!("contained {c:.2} covered {cov:.2}; tried {}", tried.join(" "))))
         }
         Some((c, cov, ident, _)) => Err(format!("best {ident} contained {c:.2} covered {cov:.2} < 0.95/0.80; tried {}", tried.join(" "))),
@@ -490,7 +490,8 @@ fn correct_tilted_twin_dir(source: &str, twin: &str, dir: u8) -> u8 {
         // Platform tilted checkpoints use a quarter-turn offset relative to
         // their plain tilted twin. Keep this separate from road corrections:
         // their placement convention is different.
-        (dir + 3) % 4
+        // Right +3 confirmed in-game; Down +2 matches the measured geometry.
+        if source.contains("Down") { (dir + 2) % 4 } else { (dir + 3) % 4 }
     } else if (is_tilted_checkpoint && twin.contains("TiltStraight"))
         || (is_slope_checkpoint && twin.contains("SlopeStraight"))
     {
@@ -594,6 +595,14 @@ mod tests {
             let twin = format!("Platform{}Slope2Straight", material);
             assert_eq!(correct_tilted_twin_dir(&source, &twin, 1), 0);
         }
+    }
+
+    #[test]
+    fn platform_slope2_down_uses_measured_offset() {
+        assert_eq!(
+            correct_tilted_twin_dir("PlatformIceCheckpointSlope2Down", "PlatformIceSlope2Straight", 1),
+            3
+        );
     }
 
     #[test]
