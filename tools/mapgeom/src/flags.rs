@@ -13,10 +13,10 @@ use tmmaps::map::MapFile;
 
 const TRIGGER_8M_MODEL: &str = "ClothFinishTriggerFlag8m.Item.Gbx";
 const TRIGGER_8M_ASSET: &[u8] = include_bytes!("../assets/ClothFinishTriggerFlag8m.Item.Gbx");
-const TRIGGER_16M_MODEL: &str = "ClothFinishTrigger.Item.Gbx";
-const TRIGGER_16M_ASSET: &[u8] = include_bytes!("../assets/ClothFinishTrigger.Item.Gbx");
+const TRIGGER_16M_MODEL: &str = "ClothFinishTriggerFlag16m.Item.Gbx";
+const TRIGGER_16M_ASSET: &[u8] = include_bytes!("../assets/ClothFinishTriggerFlag16m.Item.Gbx");
 const TRIGGER_8M_COLLECTION: u32 = 29;
-const TRIGGER_16M_COLLECTION: u32 = 16;
+const TRIGGER_16M_COLLECTION: u32 = 29;
 
 #[derive(Default)]
 pub struct Outcome {
@@ -166,6 +166,13 @@ pub fn remove_finishes(
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
+    m.edit_header_xml(&|xml| {
+        if xml.contains("validated=\"1\"") {
+            Some(xml.replace("validated=\"1\"", "validated=\"0\""))
+        } else {
+            None
+        }
+    });
     m.set_map_name(&source_name, &new_name);
     m.write_to(out).map_err(|e| e.to_string())?;
     m = MapFile::try_load(out)?;
@@ -367,7 +374,7 @@ pub fn verify(
         .ok_or_else(|| format!("{} has no embedded-objects archive", out.display()))?;
     if ![
     "Items/ClothFinishTriggerFlag8m.Item.Gbx",
-    "Items/ClothFinishTrigger.Item.Gbx",
+    "Items/ClothFinishTriggerFlag16m.Item.Gbx",
     ]
     .iter()
     .all(|required| embedded.1.iter().any(|name| name.replace('\\', "/") == *required))
