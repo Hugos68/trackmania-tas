@@ -1,7 +1,8 @@
 //! Start-To-The-Finish checkpoint conversion.
 //!
 //! Checkpoint blocks are replaced by their plain twins, preserving placement
-//! flags and direction; checkpoint items and the validation ghost are removed.
+//! flags and correcting direction where the plain twin uses a different
+//! orientation convention; checkpoint items are removed.
 
 use crate::blockmap::BlockInfoIndex;
 use crate::sttc::{
@@ -32,6 +33,23 @@ pub fn twin_candidates(name: &str) -> Vec<String> {
     }
     if norm == "PlatformTechCheckpoint" {
         push("PlatformTechBase".to_string());
+    }
+    if norm.starts_with("Platform")
+        && !norm.starts_with("PlatformTech")
+        && norm.contains("CheckpointSlope2")
+    {
+        // The flat platform twin is the straight tilted piece. The generic
+        // Slope2Base candidate is a curved piece and is not interchangeable.
+        for (from, to) in [
+            ("CheckpointSlope2Up", "Slope2Straight"),
+            ("CheckpointSlope2Down", "Slope2Straight"),
+            ("CheckpointSlope2Left", "Slope2Straight"),
+            ("CheckpointSlope2Right", "Slope2Straight"),
+        ] {
+            if norm.contains(from) {
+                push(norm.replacen(from, to, 1));
+            }
+        }
     }
     for (from, to) in [
         ("CheckpointTiltLeft", "TiltStraight"),
@@ -461,7 +479,16 @@ fn correct_tilted_twin_dir(source: &str, twin: &str, dir: u8) -> u8 {
         source.contains("CheckpointTiltLeft") || source.contains("CheckpointTiltRight");
     let is_slope_checkpoint =
         source.contains("CheckpointSlopeUp") || source.contains("CheckpointSlopeDown");
-    if (is_tilted_checkpoint && twin.contains("TiltStraight"))
+    let is_nontech_platform_slope2 =
+        source.starts_with("Platform")
+            && !source.starts_with("PlatformTech")
+            && source.contains("CheckpointSlope2")
+            && twin.contains("Slope2Straight");
+    if is_nontech_platform_slope2 {
+        // Non-road platform Slope2 checkpoints use a quarter-turn offset
+        // relative to their straight twin.
+        (dir + 3) % 4
+    } else if (is_tilted_checkpoint && twin.contains("TiltStraight"))
         || (is_slope_checkpoint && twin.contains("SlopeStraight"))
     {
         (dir + 2) % 4
