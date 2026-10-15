@@ -1,8 +1,8 @@
 //! Start-To-The-Finish checkpoint conversion.
 //!
 //! Checkpoint blocks are replaced by their plain twins, preserving placement
-//! flags and correcting direction where the plain twin uses a different
-//! orientation convention; checkpoint items are removed.
+//! flags. The twin is picked by name and its rotation is measured by comparing
+//! block geometry from the game packs; checkpoint items are removed.
 
 use crate::blockmap::BlockInfoIndex;
 use crate::sttc::{
@@ -33,23 +33,6 @@ pub fn twin_candidates(name: &str) -> Vec<String> {
     }
     if norm == "PlatformTechCheckpoint" {
         push("PlatformTechBase".to_string());
-    }
-    if norm.starts_with("Platform")
-        && !norm.starts_with("PlatformTech")
-        && norm.contains("CheckpointSlope2")
-    {
-        // The flat platform twin is the straight tilted piece. The generic
-        // Slope2Base candidate is a curved piece and is not interchangeable.
-        for (from, to) in [
-            ("CheckpointSlope2Up", "Slope2Straight"),
-            ("CheckpointSlope2Down", "Slope2Straight"),
-            ("CheckpointSlope2Left", "Slope2Straight"),
-            ("CheckpointSlope2Right", "Slope2Straight"),
-        ] {
-            if norm.contains(from) {
-                push(norm.replacen(from, to, 1));
-            }
-        }
     }
     for (from, to) in [
         ("CheckpointTiltLeft", "TiltStraight"),
@@ -397,38 +380,7 @@ pub fn sttf(ctx: &mut Ctx, src: &Path, out: &Path, cp: CpMode, dry: bool) -> Res
 fn find_twin_split(idx: &mut BlockInfoIndex, asm: &mut crate::assemble::Assembler, b: &BlockRec) -> Result<(String, u8, String), String> {
     let cands = twin_candidates(&b.name);
     let Some(cp) = profile(asm, &b.name) else {
-        // Dedicated/server packs contain the block-info records but not
-        // necessarily the prefab geometry. The checkpoint/plain naming pair
-        // is still authoritative in that case: keep the placement's flags
-        // (including air/ground mode) and rotation, and only change the model
-        // name. This is preferable to deleting a checkpoint whose plain twin
-        // is unambiguous.
-        for cand in &cands {
-            let Some(path) = idx.resolve_one(&mut *asm.store, cand) else {
-                continue;
-            };
-            let ident = match idx.load(&mut *asm.store, &path) {
-                Ok(bi) if !bi.ident.is_empty() => bi.ident.clone(),
-                Ok(bi) => bi.name.clone(),
-                Err(_) => cand.clone(),
-            };
-            let dir = correct_tilted_twin_dir(&b.name, cand, b.dir);
-            return Ok((
-                ident,
-                dir,
-                format!("geometry unavailable; selected named plain twin {cand}, direction {dir}"),
-            ));
-        }
-        if let Some(cand) = cands.first() {
-            let dir = correct_tilted_twin_dir(&b.name, cand, b.dir);
-            return Ok((
-                cand.clone(),
-                dir,
-                format!("geometry and pack metadata unavailable; selected named plain twin {cand}, direction {dir}"),
-            ));
-        }
-
-        return Err(format!("no geometry for {} and no named plain twin", b.name));
+        return Err(format!("no geometry for {}", b.name));
     };
     let mut tried: Vec<String> = Vec::new();
     let mut best: Option<(f32, f32, String, u8)> = None;
@@ -471,33 +423,6 @@ fn find_twin_split(idx: &mut BlockInfoIndex, asm: &mut crate::assemble::Assemble
         }
         Some((c, cov, ident, _)) => Err(format!("best {ident} contained {c:.2} covered {cov:.2} < 0.95/0.80; tried {}", tried.join(" "))),
         None => Err(format!("no candidate exists among {:?}", cands)),
-    }
-}
-
-fn correct_tilted_twin_dir(source: &str, twin: &str, dir: u8) -> u8 {
-    let is_tilted_checkpoint =
-        source.contains("CheckpointTiltLeft") || source.contains("CheckpointTiltRight");
-    let is_slope_checkpoint =
-        source.contains("CheckpointSlopeUp") || source.contains("CheckpointSlopeDown");
-    let is_platform_tilted_checkpoint =
-        source.starts_with("Platform")
-            && (source.contains("CheckpointTilt")
-                || source.contains("CheckpointSlope"))
-            && (twin.contains("TiltStraight")
-                || twin.contains("SlopeStraight")
-                || twin.contains("Slope2Straight"));
-    if is_platform_tilted_checkpoint {
-        // Platform tilted checkpoints use a quarter-turn offset relative to
-        // their plain tilted twin. Keep this separate from road corrections:
-        // their placement convention is different.
-        // Right +3 confirmed in-game; Down +2 matches the measured geometry.
-        if source.contains("Down") { (dir + 2) % 4 } else { (dir + 3) % 4 }
-    } else if (is_tilted_checkpoint && twin.contains("TiltStraight"))
-        || (is_slope_checkpoint && twin.contains("SlopeStraight"))
-    {
-        (dir + 2) % 4
-    } else {
-        dir
     }
 }
 
@@ -582,38 +507,4 @@ pub fn verify_sttf(src: &Path, out: &Path, outcome: &SttfOutcome) -> Result<Vec<
         bad.push("validation ghost chunk still present".into());
     }
     Ok(bad)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::correct_tilted_twin_dir;
-
-    #[test]
-    fn platform_tilted_twins_turn_counter_clockwise() {
-        for material in ["Grass", "Dirt", "Ice", "Plastic", "Snow", "Future"] {
-            let source = format!("Platform{}CheckpointSlope2Right", material);
-            let twin = format!("Platform{}Slope2Straight", material);
-            assert_eq!(correct_tilted_twin_dir(&source, &twin, 1), 0);
-        }
-    }
-
-    #[test]
-    fn platform_slope2_down_uses_measured_offset() {
-        assert_eq!(
-            correct_tilted_twin_dir("PlatformIceCheckpointSlope2Down", "PlatformIceSlope2Straight", 1),
-            3
-        );
-    }
-
-    #[test]
-    fn platform_regular_and_road_tilt_rules_remain_distinct() {
-        assert_eq!(
-            correct_tilted_twin_dir("PlatformGrassCheckpoint", "PlatformGrassStraight", 1),
-            1
-        );
-        assert_eq!(
-            correct_tilted_twin_dir("RoadTechCheckpointTiltLeft", "RoadTechTiltStraight", 1),
-            3
-        );
-    }
 }

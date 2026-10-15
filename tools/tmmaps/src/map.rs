@@ -3906,6 +3906,8 @@ impl MapFile {
     ///     are un-snapped; `snapped` keeps one entry per kept item);
     ///   * chunks 0x03043062 (colour) and 0x03043068 (lightmap quality): the
     ///     dropped items' bytes go;
+    ///   * chunk 0x03043063 (animation phase): the same, but it holds items only
+    ///     (no block bytes);
     ///   * chunk 0x03043069: the dropped items' macroblock refs go.
     ///
     /// The embedded-items zip (0x03043054) is untouched: an unused model costs
@@ -4041,6 +4043,13 @@ impl MapFile {
                 }
             }
             splices.push(((payload + 4 + nb + nk, payload + 4 + nb + nk + ni), kept));
+        }
+        // --- the animation phase (0x63) holds one byte per item and nothing else
+        for cid in [0x0304_3063u32] {
+            let Some(&(_, _, payload, size)) = chunks.iter().find(|(c, ..)| *c == cid) else { continue };
+            assert_eq!(size, 4 + ni, "chunk {cid:#010x} has {size} bytes, not 4 + {ni} items");
+            let kept: Vec<u8> = keep.iter().enumerate().filter(|(_, k)| **k).map(|(j, _)| body[payload + 4 + j]).collect();
+            splices.push(((payload + 4, payload + 4 + ni), kept));
         }
         // --- 0x03043069: the per-item macroblock refs
         if let Some(mb) = self.macroblock_refs() {
