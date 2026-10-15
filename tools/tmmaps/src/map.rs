@@ -1089,6 +1089,79 @@ impl MapFile {
         self.strip_validation_ghost_to(GhostForm::Remove)
     }
 
+    /// Clear the author time while preserving the map author identity.
+    /// TrackMania represents an unset time as signed -1 milliseconds.
+    pub fn clear_author_time(&mut self, hdr: &crate::header::MapHeader) {
+        let skips = crate::gbx::all_skip_chunks(&self.gbx.body);
+        let old_b: u32 = hdr.bronze.parse().ok().expect("header times");
+        let old_s: u32 = hdr.silver.parse().ok().expect("header times");
+        let old_g: u32 = hdr.gold.parse().ok().expect("header times");
+        let old_a: u32 = hdr.authortime.parse().ok().expect("header times");
+        let unset = (-1i32).to_le_bytes().to_vec();
+        let expect = |buf: &[u8], at: usize, want: u32, what: &str| {
+            let got = u32::from_le_bytes(buf[at..at + 4].try_into().unwrap());
+            assert!(got == want, "{what}: read {got} where the header says {want}");
+        };
+        let &(_, _, pa, sa) = skips.iter().find(|(c, ..)| *c == 0x0305_B00A).expect("no 0x0305B00A");
+        let b00a = &self.gbx.body[pa..pa + sa];
+        let tip_len = u32::from_le_bytes(b00a[0..4].try_into().unwrap()) as usize;
+        let t0 = 4 + tip_len;
+        expect(b00a, t0, old_b, "0x0305B00A bronze");
+        expect(b00a, t0 + 4, old_s, "0x0305B00A silver");
+        expect(b00a, t0 + 8, old_g, "0x0305B00A gold");
+        expect(b00a, t0 + 12, old_a, "0x0305B00A author");
+        self.raw_patches.push((pa + t0 + 12, unset.clone()));
+        self.raw_patches.push((pa + t0 + 20, unset.clone()));
+
+        let prefix = &self.gbx.body[..pa];
+        let find_id = |id: u32| -> usize {
+            let pat = id.to_le_bytes();
+            let hits: Vec<usize> = prefix.windows(4).enumerate().filter(|(_, w)| *w == pat).map(|(i, _)| i).collect();
+            assert!(hits.len() == 1, "chunk {id:#010x}: {} occurrences", hits.len());
+            hits[0] + 4
+        };
+        let p4 = find_id(0x0305_B004);
+        expect(&self.gbx.body, p4, old_b, "0x0305B004 bronze");
+        expect(&self.gbx.body, p4 + 4, old_s, "0x0305B004 silver");
+        expect(&self.gbx.body, p4 + 8, old_g, "0x0305B004 gold");
+        expect(&self.gbx.body, p4 + 12, old_a, "0x0305B004 author");
+        self.raw_patches.push((p4 + 12, unset.clone()));
+        let p8 = find_id(0x0305_B008);
+        self.raw_patches.push((p8 + 4, unset.clone()));
+
+        let ud = &mut self.gbx.user_data;
+        let n = u32::from_le_bytes(ud[0..4].try_into().unwrap()) as usize;
+        let mut data_off = 4 + n * 8;
+        for i in 0..n {
+            let o = 4 + i * 8;
+            let id = u32::from_le_bytes(ud[o..o + 4].try_into().unwrap());
+            let size = (u32::from_le_bytes(ud[o + 4..o + 8].try_into().unwrap()) & 0x7fff_ffff) as usize;
+            if id == 0x0304_3002 {
+                let t = data_off + 5;
+                expect(ud, t, old_b, "header bronze");
+                expect(ud, t + 4, old_s, "header silver");
+                expect(ud, t + 8, old_g, "header gold");
+                expect(ud, t + 12, old_a, "header author");
+                ud[t + 12..t + 16].copy_from_slice(&unset);
+                ud[t + 32..t + 36].copy_from_slice(&unset);
+            }
+            data_off += size;
+        }
+        self.edit_header_xml(&|xml| {
+            let start = xml.find("<times ")?;
+            let end = xml[start..].find("/>")? + start + 2;
+            let current = &xml[start..end];
+            let mut replacement = current.to_string();
+            for name in ["authortime", "authorscore"] {
+                let key = format!("{name}=\"");
+                let a = replacement.find(&key)? + key.len();
+                let b = replacement[a..].find('"')? + a;
+                replacement.replace_range(a..b, "-1");
+            }
+            Some(format!("{}{}{}", &xml[..start], replacement, &xml[end..]))
+        });
+    }
+
     /// `strip_validation_ghost` with the chunk's replacement chosen. The
     /// chunk's payload is `u32 version (0)`, `u32 byte length`, then the
     /// CGameCtnGhost node written inline (class id + chunks; no node index) —

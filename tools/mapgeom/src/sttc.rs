@@ -34,7 +34,7 @@ use crate::blockmap::{footprint, BlockInfoIndex, FLAG_GROUND, FLAG_PILLAR, FLAG_
 use crate::store::DataStore;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use tmmaps::map::{BlockRec, GhostForm, ItemRec, MapFile, FREE_BLOCK_FLAG};
+use tmmaps::map::{BlockRec, ItemRec, MapFile, FREE_BLOCK_FLAG};
 use crate::sttf::{match_score, sttf, twin_candidates, verify_sttf, CpMode, Profile, SttfOutcome};
 
 pub const WP_START: i32 = 0;
@@ -839,7 +839,7 @@ pub fn center_finish(ctx: &mut Ctx, src: &Path, out: &Path, o: &CenterOpts, dry:
         let p = rec.free_pos.expect("free pos");
         m.move_baked_free(*idx, shifted(p, dwe));
     }
-    m.strip_validation_ghost_to(GhostForm::Remove);
+    crate::validation::remove(&mut m, &hdr);
     if o.strip_lightmap {
         m.strip_lightmap();
     }

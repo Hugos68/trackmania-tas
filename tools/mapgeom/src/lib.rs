@@ -78,6 +78,7 @@ pub mod veget;
 pub mod veget_instance;
 pub mod zipcheck;
 pub mod static_item;
+pub mod validation;
 pub mod sttc;
 pub mod sttf;
 pub mod flags;

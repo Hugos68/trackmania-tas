@@ -81,11 +81,11 @@ pub fn remove_finishes(
     dry: bool,
 ) -> Result<Outcome, String> {
     let mut working_src = src.to_path_buf();
-    let source_name = tmmaps::header::read(
+    let source_header = tmmaps::header::read(
         src.to_str()
             .ok_or_else(|| format!("map path is not valid UTF-8: {}", src.display()))?,
-    )?
-    .name;
+    )?;
+    let source_name = source_header.name.clone();
     if source_name == "-" || source_name.is_empty() {
         return Err(format!(
             "{} does not declare an internal map name",
@@ -114,6 +114,11 @@ pub fn remove_finishes(
         working_src = sttf_path;
     }
     let mut m = MapFile::try_load(&working_src)?;
+    let working_header = tmmaps::header::read(
+        working_src
+            .to_str()
+            .ok_or_else(|| format!("map path is not valid UTF-8: {}", working_src.display()))?,
+    )?;
     if working_src != src {
         std::fs::remove_file(&working_src).map_err(|e| e.to_string())?;
     }
@@ -166,6 +171,7 @@ pub fn remove_finishes(
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
+    crate::validation::remove(&mut m, &working_header);
     m.edit_header_xml(&|xml| {
         if xml.contains("validated=\"1\"") {
             Some(xml.replace("validated=\"1\"", "validated=\"0\""))

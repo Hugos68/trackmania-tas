@@ -10,7 +10,7 @@ use crate::sttc::{
 use crate::store::DataStore;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use tmmaps::map::{BlockRec, GhostForm, ItemRec, MapFile};
+use tmmaps::map::{BlockRec, ItemRec, MapFile};
 
 use super::sttc::Row;
 
@@ -155,6 +155,10 @@ pub enum CpMode {
 
 pub fn sttf(ctx: &mut Ctx, src: &Path, out: &Path, cp: CpMode, dry: bool) -> Result<SttfOutcome, String> {
     let map_label = src.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+    let header = tmmaps::header::read(
+        src.to_str()
+            .ok_or_else(|| format!("map path is not valid UTF-8: {}", src.display()))?,
+    )?;
     let mut m = MapFile::try_load(src)?;
     let mut rows = Vec::new();
     let (mut replaced, mut removed_blocks, mut removed_items, mut mismatches, mut unresolved) = (0, 0, 0, 0, 0);
@@ -364,7 +368,7 @@ pub fn sttf(ctx: &mut Ctx, src: &Path, out: &Path, cp: CpMode, dry: bool) -> Res
         m = MapFile::try_load(out)?;
     }
     // pass D: the validation ghost (it drove through checkpoints that no longer exist)
-    m.strip_validation_ghost_to(GhostForm::Remove);
+    crate::validation::remove(&mut m, &header);
     m.write_to(out).map_err(|e| e.to_string())?;
     Ok(SttfOutcome { rows, replaced, removed_blocks, removed_items, removed_baked, mismatches, unresolved })
 }
